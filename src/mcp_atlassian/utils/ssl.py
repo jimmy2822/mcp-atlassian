@@ -85,9 +85,26 @@ def configure_ssl_verification(
         ssl_verify: Whether SSL verification should be enabled
     """
     if not ssl_verify:
-        logger.warning(
-            f"{service_name} SSL verification disabled. This is insecure and should only be used in testing environments."
+        # Security: Emit strong warnings when SSL verification is disabled
+        logger.error(
+            f"⚠️  SECURITY WARNING: {service_name} SSL verification has been DISABLED!"
         )
+        logger.error(
+            f"⚠️  This makes the connection vulnerable to man-in-the-middle attacks."
+        )
+        logger.error(
+            f"⚠️  URL affected: {url}"
+        )
+        logger.error(
+            f"⚠️  Only use this in isolated test environments. NEVER in production!"
+        )
+        
+        # Log to audit trail if available
+        import os
+        if os.getenv("SECURITY_AUDIT_LOG"):
+            with open(os.getenv("SECURITY_AUDIT_LOG"), "a") as audit:
+                import datetime
+                audit.write(f"{datetime.datetime.now().isoformat()} - SSL_VERIFICATION_DISABLED - {service_name} - {url}\n")
 
         # Get the domain from the configured URL
         domain = urlparse(url).netloc

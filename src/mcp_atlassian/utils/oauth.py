@@ -104,20 +104,22 @@ class OAuthConfig:
             }
 
             logger.info(f"Exchanging authorization code for tokens at {TOKEN_URL}")
-            logger.debug(f"Token exchange payload: {pprint.pformat(payload)}")
+            # Security: Don't log sensitive payload data
+            safe_payload = {k: v if k not in ['client_secret', 'code'] else '***REDACTED***' 
+                          for k, v in payload.items()}
+            logger.debug(f"Token exchange payload (sanitized): {pprint.pformat(safe_payload)}")
 
             response = requests.post(TOKEN_URL, data=payload)
 
-            # Log more details about the response
+            # Log more details about the response (security: without sensitive data)
             logger.debug(f"Token exchange response status: {response.status_code}")
-            logger.debug(
-                f"Token exchange response headers: {pprint.pformat(response.headers)}"
-            )
-            logger.debug(f"Token exchange response body: {response.text[:500]}...")
+            # Security: Don't log response headers or body which may contain tokens
+            logger.debug("Token exchange response received")
 
             if not response.ok:
+                # Security: Don't log full response text which might contain sensitive data
                 logger.error(
-                    f"Token exchange failed with status {response.status_code}. Response: {response.text}"
+                    f"Token exchange failed with status {response.status_code}"
                 )
                 return False
 
@@ -148,16 +150,12 @@ class OAuthConfig:
             # Save the tokens
             self._save_tokens()
 
-            # Log success message with token details
+            # Log success message without exposing token details
             logger.info(
                 f"✅ OAuth token exchange successful! Access token expires in {token_data['expires_in']}s."
             )
-            logger.info(
-                f"Access Token (partial): {self.access_token[:10]}...{self.access_token[-5:] if self.access_token else ''}"
-            )
-            logger.info(
-                f"Refresh Token (partial): {self.refresh_token[:5]}...{self.refresh_token[-3:] if self.refresh_token else ''}"
-            )
+            # Security: Do not log tokens, even partially
+            logger.debug("OAuth tokens received and stored securely")
             if self.cloud_id:
                 logger.info(f"Cloud ID successfully retrieved: {self.cloud_id}")
             else:
@@ -173,9 +171,8 @@ class OAuthConfig:
                 f"Failed to decode JSON response from token endpoint: {e}",
                 exc_info=True,
             )
-            logger.error(
-                f"Response text that failed to parse: {response.text if 'response' in locals() else 'Response object not available'}"
-            )
+            # Security: Don't log response text which might contain sensitive data
+            logger.error("Response parsing failed - check token endpoint configuration")
             return False
         except Exception as e:
             logger.error(f"Failed to exchange code for tokens: {e}")
@@ -303,10 +300,14 @@ class OAuthConfig:
             token_data: Optional dict with token data. If not provided,
                         will use the current object attributes.
         """
+        import stat
         try:
             # Create the directory if it doesn't exist
             token_dir = Path.home() / ".mcp-atlassian"
-            token_dir.mkdir(exist_ok=True)
+            token_dir.mkdir(exist_ok=True, mode=0o700)  # Security: Directory only accessible by owner
+            
+            # Set secure permissions on the directory
+            token_dir.chmod(0o700)
 
             # Save the tokens to a file
             token_path = token_dir / f"oauth-{self.client_id}.json"
@@ -319,10 +320,17 @@ class OAuthConfig:
                     "cloud_id": self.cloud_id,
                 }
 
-            with open(token_path, "w") as f:
+            # Security: Create file with secure permissions (owner read/write only)
+            # Use os.open with specific flags for security
+            import os
+            fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
                 json.dump(token_data, f)
+            
+            # Double-check permissions are correct
+            token_path.chmod(0o600)
 
-            logger.debug(f"Saved OAuth tokens to file {token_path} (fallback storage)")
+            logger.debug(f"Saved OAuth tokens to file {token_path} with secure permissions (600)")
         except Exception as e:
             logger.error(f"Failed to save tokens to file: {e}")
 

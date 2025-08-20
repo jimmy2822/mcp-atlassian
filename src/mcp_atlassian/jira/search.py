@@ -7,6 +7,7 @@ from requests.exceptions import HTTPError
 
 from ..exceptions import MCPAtlassianAuthenticationError
 from ..models.jira import JiraSearchResult
+from ..utils.security import validate_jql_query, InputValidationError
 from .client import JiraClient
 from .constants import DEFAULT_READ_JIRA_FIELDS
 from .protocols import IssueOperationsProto
@@ -47,6 +48,13 @@ class SearchMixin(JiraClient, IssueOperationsProto):
             Exception: If there is an error searching for issues
         """
         try:
+            # Security: Validate JQL query to prevent injection attacks
+            try:
+                jql = validate_jql_query(jql) if jql else ""
+            except InputValidationError as e:
+                logger.error(f"JQL validation failed: {e}")
+                raise MCPAtlassianAuthenticationError(f"Invalid JQL query: {e}") from e
+            
             # Use projects_filter parameter if provided, otherwise fall back to config
             filter_to_use = projects_filter or self.config.projects_filter
 
